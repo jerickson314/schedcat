@@ -92,10 +92,12 @@ double GELPl::compute_exact_s(double S, const std::vector<double>& Y_ints) {
                 if (intersect >= 0.0) {
                     if (utilizations[i] < utilizations[j]) {
                         replacement.old_task = i;
+			replacement.old_task_utilization = utilizations[i];
                         replacement.new_task = j;
                     }
                     else {
                         replacement.old_task = j;
+			replacement.old_task_utilization = utilizations[j];
                         replacement.new_task = i;
                     }
                     replacements.push_back(replacement);

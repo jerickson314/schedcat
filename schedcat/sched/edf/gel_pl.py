@@ -26,7 +26,7 @@ def compute_gfl_response_bounds(no_cpus, tasks, rounds):
     """
     if schedcat.sched.using_native:
         native_ts = schedcat.sched.get_native_taskset(tasks)
-        gel_obj = native.GELPl(native,GELPl.GFL,
+        gel_obj = native.GELPl(native.GELPl.GFL,
                                no_cpus, native_ts, rounds)
         return [gel_obj.get_bound(i) for i in range(len(tasks))]
     else:
@@ -41,7 +41,7 @@ def compute_gedf_response_bounds(no_cpus, tasks, rounds):
     """
     if schedcat.sched.using_native:
         native_ts = schedcat.sched.get_native_taskset(tasks)
-        gel_obj = native.GELPl(native,GELPl.GEDF,
+        gel_obj = native.GELPl(native.GELPl.GEDF,
                                no_cpus, native_ts, rounds)
         return [gel_obj.get_bound(i) for i in range(len(tasks))]
     else:
@@ -77,8 +77,6 @@ def compute_response_bounds(no_cpus, tasks, sched_pps, rounds):
     else:
         s = compute_binsearch_s(no_cpus, tasks, sum(S_i), Y_ints, rounds)
 
-    print 's = ',
-    print s
     return [int(ceil(s - tasks[i].cost / no_cpus + tasks[i].cost
                 + analysis_pps[i]))
             for i in range(len(tasks))]
@@ -98,7 +96,17 @@ def compute_exact_s(no_cpus, tasks, S, Y_ints):
                         replacements.append( (intersect, i, j) )
                     else:
                         replacements.append( (intersect, j, i) )
-    replacements.sort(key=lambda r: r[0])
+    # Break ties by order of increasing utilization of replaced tasks.  Avoids
+    # an edge case.  Consider tasks A, B, C, in order of decreasing
+    # utilization.  If the top m-1 items include tasks B and C, it is possible
+    # (without the tie break) to have the following replacements:
+    # C->B (no change)
+    # B->A (now A and C in set considered)
+    # C->A (no change)
+    #
+    # However, proper behavior should include A and B in considered set.  The
+    # tie break avoids this case.
+    replacements.sort(key=lambda r: (r[0], tasks[r[1]].utilization()))
 
     # The piecewise linear function we are tracing is G(s) + S(\tau) - ms, as
     # discussed (with L(s) in place of G(s)) in EGB'10.  We start at s = 0 and

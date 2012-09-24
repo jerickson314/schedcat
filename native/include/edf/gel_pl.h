@@ -30,9 +30,12 @@ class GELPl
         unsigned int old_task;
         unsigned int new_task;
         double location;
+	double old_task_utilization;
 
         bool operator<(const ReplacementType& other) const {
-            return location < other.location;
+            return (location < other.location)
+                   || ((location == other.location)
+                       && (old_task_utilization < other.old_task_utilization));
         }
     };
 

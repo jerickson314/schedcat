@@ -13,6 +13,8 @@ class GELPl
     int no_cpus;
     const TaskSet& tasks;
     int rounds;
+    std::vector<double> S_i;
+    std::vector<double> G_i;
 
     // For faster lookups, to avoid too many conversions.
     std::vector<double> utilizations;
@@ -64,7 +66,15 @@ class GELPl
 
    unsigned long get_bound(unsigned int index) {
         return bounds[index];
-   };
+   }
+
+   double get_Si(unsigned int index) {
+   	return S_i[index];
+   }
+
+   double get_Gi(unsigned int index) {
+   	return G_i[index];
+   }
 };
 
 #endif

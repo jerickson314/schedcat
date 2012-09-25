@@ -19,7 +19,14 @@ if schedcat.sched.using_native:
 
 import heapq
 
-def compute_gfl_response_bounds(no_cpus, tasks, rounds):
+class AnalysisDetails:
+    def __init__(self, num_tasks, gel_obj = None):
+        if gel_obj is not None:
+            self.bounds = [gel_obj.get_bound(i) for i in range(num_tasks)]
+            self.S_i = [gel_obj.get_Si(i) for i in range(num_tasks)]
+            self.G_i = [gel_obj.get_Gi(i) for i in range(num_tasks)]
+
+def compute_gfl_response_details(no_cpus, tasks, rounds):
     """This function computes response time bounds for the given set of tasks
        using G-FL.  "rounds" determines the number of rounds of binary search;
        using "0" results in using the exact algorithm.
@@ -28,13 +35,13 @@ def compute_gfl_response_bounds(no_cpus, tasks, rounds):
         native_ts = schedcat.sched.get_native_taskset(tasks)
         gel_obj = native.GELPl(native.GELPl.GFL,
                                no_cpus, native_ts, rounds)
-        return [gel_obj.get_bound(i) for i in range(len(tasks))]
+        return AnalysisDetails(len(tasks), gel_obj)
     else:
         gfl_pps = [task.deadline - int((no_cpus - 1) / (no_cpus) * task.cost)
                    for task in tasks]
         return compute_response_bounds(no_cpus, tasks, gfl_pps, rounds)
 
-def compute_gedf_response_bounds(no_cpus, tasks, rounds):
+def compute_gedf_response_details(no_cpus, tasks, rounds):
     """This function computes response time bounds for a given set of tasks
        using G-EDF.  "rounds" determines the number of rounds of binary search;
        using "0" results in using the exact algorithm.
@@ -43,7 +50,7 @@ def compute_gedf_response_bounds(no_cpus, tasks, rounds):
         native_ts = schedcat.sched.get_native_taskset(tasks)
         gel_obj = native.GELPl(native.GELPl.GEDF,
                                no_cpus, native_ts, rounds)
-        return [gel_obj.get_bound(i) for i in range(len(tasks))]
+        return AnalysisDetails(len(tasks), gel_obj)
     else:
         gedf_pps = [task.deadline for task in tasks]
         return compute_response_bounds(no_cpus, tasks, gedf_pps, rounds)
@@ -77,9 +84,14 @@ def compute_response_bounds(no_cpus, tasks, sched_pps, rounds):
     else:
         s = compute_binsearch_s(no_cpus, tasks, sum(S_i), Y_ints, rounds)
 
-    return [int(ceil(s - tasks[i].cost / no_cpus + tasks[i].cost
-                + analysis_pps[i]))
-            for i in range(len(tasks))]
+    details = AnalysisDetails(len(tasks))
+    details.bounds = [int(ceil(s - tasks[i].cost / no_cpus + tasks[i].cost
+                      + analysis_pps[i]))
+                      for i in range(len(tasks))]
+    details.S_i = S_i
+    details.G_i = [Y_ints[i] + s * tasks[i].utilization()
+                   for i in range(len(tasks))]
+    return details
 
 def compute_exact_s(no_cpus, tasks, S, Y_ints):
     replacements = []
@@ -187,9 +199,9 @@ def bound_gedf_response_times(no_cpus, tasks, rounds):
         return bound_response_times_from_native(no_cpus, tasks, gel_obj)
 
     else:
-        response_bounds = compute_gedf_response_bounds(no_cpus, tasks, rounds)
+        response_details = compute_gedf_response_details(no_cpus, tasks, rounds)
 
-        return bound_response_times(tasks, response_bounds)
+        return bound_response_times(tasks, response_details)
 
 def bound_gfl_response_times(no_cpus, tasks, rounds):
     if schedcat.sched.using_native:
@@ -199,17 +211,17 @@ def bound_gfl_response_times(no_cpus, tasks, rounds):
         return bound_response_times_from_native(no_cpus, tasks, gel_obj)
 
     else:
-        response_bounds = compute_gfl_response_bounds(no_cpus, tasks, rounds)
+        response_details = compute_gfl_response_details(no_cpus, tasks, rounds)
 
-        return bound_response_times(tasks, response_bounds)
+        return bound_response_times(tasks, response_details)
 
-def bound_response_times(tasks, response_bounds):
-    if response_bounds is None:
+def bound_response_times(tasks, response_details):
+    if response_details is None:
         return False
 
     else:
         for i in range(len(tasks)):
-            tasks[i].response_time = response_bounds[i]
+            tasks[i].response_time = response_details.bounds[i]
         return True
 
 def bound_response_times_from_native(no_cpus, tasks, gel_obj):

@@ -23,6 +23,8 @@ GELPl::GELPl(Scheduler sched, unsigned int num_processors, const TaskSet& ts,
     // Reserve capacity in all vectors to minimize allocation costs.
     pps.reserve(task_count);
     Y_ints.reserve(task_count);
+    S_i.reserve(task_count);
+    G_i.reserve(task_count);
 
     // For faster lookups
     utilizations.reserve(task_count);
@@ -54,10 +56,10 @@ GELPl::GELPl(Scheduler sched, unsigned int num_processors, const TaskSet& ts,
         const Task& task = tasks[i];
         double wcet = double(task.get_wcet());
         double period = double(task.get_period());
-        double S_i = std::max(0.0, wcet * (1.0 -  double(pps[i])/ period));
-        S += S_i;
+        S_i[i] = std::max(0.0, wcet * (1.0 -  double(pps[i])/ period));
+        S += S_i[i];
         Y_ints.push_back((0.0 - wcet/no_cpus) * (wcet / period)
-                         + task.get_wcet() - S_i);
+                         + task.get_wcet() - S_i[i]);
     }
 
     double s;
@@ -73,6 +75,7 @@ GELPl::GELPl(Scheduler sched, unsigned int num_processors, const TaskSet& ts,
                          + tasks[i].get_wcet()
                          + (unsigned long)std::ceil(
                          s - (double(tasks[i].get_wcet() / double(no_cpus)))));
+        G_i.push_back(Y_ints[i] + s * utilizations[i]);
     }
 }
 

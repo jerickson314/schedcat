@@ -11,12 +11,13 @@ from schedcat.sched.split_heuristic import compute_splits
 
 from schedcat.mapping.rollback import Bin, MaxSpareCapacity, WorstFit
 
+from gen_ts import generate_tasksets
+
 import sys
 import os
 import re
 
 ohead_root = "/playpen/jerickso/bbbdiss/ohead-data/diss/"
-taskset_root = "/playpen/jerickso/tasksets/"
 
 class Scheduler:
     def __init__(self, name, cluster_size, num_clusters, dedicated_irq,
@@ -45,25 +46,16 @@ class DataCollector:
     def __init__(self):
         self.improvement_numerators = {}
         self.improvement_denominators = {}
+        self.raw_nonsplit_numerators = {}
+        self.raw_split_numerators = {}
 
-    def get_improvement_numerators(self, set_name):
-        if set_name not in self.improvement_numerators:
-            self.improvement_numerators[set_name] = {}
-        return self.improvement_numerators[set_name]
+    def get_sub_hash(self, parent_hash, set_name):
+        if set_name not in parent_hash:
+            parent_hash[set_name] = {}
+        return parent_hash[set_name]
 
-    def get_improvement_denominators(self, set_name):
-        if set_name not in self.improvement_denominators:
-            self.improvement_denominators[set_name] = {}
-        return self.improvement_denominators[set_name]
-
-    def add_to_numerator_entry(self, set_name, wss, value):
-        wss_map = self.get_improvement_numerators(set_name)
-        if wss not in wss_map:
-            wss_map[wss] = 0.0
-        wss_map[wss] += value
-
-    def add_to_denominator_entry(self, set_name, wss, value):
-        wss_map = self.get_improvement_denominators(set_name)
+    def add_to_entry(self, parent_hash, set_name, wss, value):
+        wss_map = self.get_sub_hash(parent_hash, set_name)
         if wss not in wss_map:
             wss_map[wss] = 0.0
         wss_map[wss] += value
@@ -74,17 +66,32 @@ class DataCollector:
                      + task_system.period_dist + "_" + str(task_system.util_cap)
         # Ignore any situation where there was already no tardiness.
         if (nonsplit_maxtard > 0.0):
+            self.add_to_entry(self.raw_nonsplit_numerators, sched_name, wss,
+                              nonsplit_maxtard)
+            self.add_to_entry(self.raw_split_numerators, sched_name, wss,
+                              split_maxtard)
             improvement = (nonsplit_maxtard - split_maxtard) / nonsplit_maxtard
             # known_schedulers is a set, so each will appear only once.
-            self.add_to_numerator_entry(sched_name, wss, improvement)
-            self.add_to_denominator_entry(sched_name, wss, 1.0)
+            self.add_to_entry(self.improvement_numerators, sched_name, wss,
+                              improvement)
+            self.add_to_entry(self.improvement_denominators,
+                                          sched_name, wss, 1.0)
 
     def get_graph_points(self, set_name):
         points = []
-        for wss in self.get_improvement_numerators(set_name):
-            points.append((wss, self.get_improvement_numerators(set_name)[wss] \
-                          / self.get_improvement_denominators(set_name)[wss],
-                          self.get_improvement_denominators(set_name)[wss]))
+        for wss in self.get_sub_hash(self.improvement_numerators, set_name):
+            denominator = self.get_sub_hash(self.improvement_denominators,
+                                            set_name)[wss]
+            improvement_num = self.get_sub_hash(self.improvement_numerators,
+                                               set_name)[wss]
+            raw_nonsplit_num = self.get_sub_hash(self.raw_nonsplit_numerators,
+                                                 set_name)[wss]
+            raw_split_num = self.get_sub_hash(self.raw_split_numerators,
+                                              set_name)[wss]
+            points.append((wss, improvement_num / denominator,
+                           raw_nonsplit_num / denominator,
+                           raw_split_num / denominator,
+                           denominator))
         return sorted(points, key=lambda t: t[0])
 
     def get_all_graph_points(self):
@@ -103,17 +110,9 @@ def get_wss_list():
     return [4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 3072, 4096, 8192, 12288]
 
 def get_task_systems(util_dist, period_dist, util_cap):
-    #return [TestTaskSystem(file_name)
-    #        for file_name in sys.argv[1:]]
-    file_names = [file_name for file_name in
-                  os.listdir(taskset_root)
-                  if re.match("taskset_" + period_dist + "_" + util_dist + "_"
-                              + util_cap, file_name)
-                  is not None]
-    full_names = [taskset_root + file_name
-                  for file_name in file_names]
+    file_names = generate_tasksets(util_dist, period_dist, util_cap)
     return [TestTaskSystem(file_name)
-            for file_name in filter(os.path.isfile, full_names)]
+            for file_name in file_names]
 
 # Taken from Bjoern's dissertation
 def partition_tasks(heur_func, cluster_size, clusters, dedicated_irq, taskset):
@@ -185,10 +184,10 @@ def process_task_systems(task_system_list, scheduler_list):
             print "Doing " + sched_name
             outfile = open('results/' + sched_name, 'w')
             for point in data[sched_name]:
-                outfile.write("{0}\t{1}\t{2}\n".format(point[0], point[1], point[2]))
+                outfile.write("{0}\t{1}\t{2}\t{3}\t{4}\n".format(point[0], point[1], point[2], point[3], point[4]))
             outfile.close()
 
-task_systems = get_task_systems(sys.argv[1], sys.argv[2], sys.argv[3])
+task_systems = get_task_systems(sys.argv[1], sys.argv[2], float(sys.argv[3]))
 #scheduler_list = [get_ludwig_schedulers()[int(sys.argv[4])]]
 scheduler_list = get_ludwig_schedulers()
 process_task_systems(task_systems, scheduler_list)

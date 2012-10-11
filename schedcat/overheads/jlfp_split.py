@@ -62,14 +62,16 @@ def charge_scheduling_overheads(oheads, num_cpus, dedicated_irq, taskset):
         unscaled = 2 * cpre
 
     for ti in taskset:
-        ti.period   -= irq_latency
-        ti.deadline -= irq_latency
+        ti.period   -= irq_latency / ti.split
+        ti.deadline -= irq_latency / ti.split
         # Initially, we will work with the fiction that jobs are scheduled
         # without accounting for overheads - the first subjob will then have
         # IPI latency, but other jobs cannot.  Actual scheduler should start
         # the budget with a provided IPI latency, so that all jobs have the
         # same length accounting for overheads.
         split_cost   = ti.cost / ti.split
+        if split_cost < oheads.ipi_latency(n):
+            return False
         # Initially set up all jobs to have the basic overheads, but no IPI
         # delay.
         first_cost   = (split_cost + sched) / uscale + 2 * cpre

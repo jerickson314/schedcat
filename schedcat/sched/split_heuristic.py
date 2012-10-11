@@ -3,7 +3,6 @@ from schedcat.overheads.model import Overheads, CacheDelay
 from schedcat.overheads.jlfp_split import charge_scheduling_overheads, \
                                           quantize_params
 
-from schedcat.model.ms2us import ms2us
 from schedcat.model.split_tasks import apply_splits
 
 from schedcat.sched.edf.gel_pl import compute_gfl_response_details, \

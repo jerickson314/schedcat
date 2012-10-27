@@ -37,10 +37,34 @@ def assign_edf_locking_prios(all_tasks):
     for t in all_tasks:
         t.locking_prio = prio[int(t.deadline)]
 
+def assign_pp_locking_prios(all_tasks):
+    all_pps = set([t.pp for t in all_tasks])
+    prio = {}
+    for i, pp in enumerate(sorted(all_pps)):
+        prio[int(pp)] = i
+
+    for t in all_tasks:
+        t.locking_prio = prio[int(t.pp)]
+
+def assign_gfl_locking_prios(all_tasks, num_cpus):
+    pps = [t.deadline - ((num_cpus - 1) / num_cpus) * inflated_exec[i]
+               for (i, t) in enumerate(all_tasks)]
+    all_pps = set(pps)
+    prio = {}
+    for i, dl in enumerate(sorted(all_pps)):
+        prio[int(dl)] = i
+
+    for i, t in enumerate(all_tasks):
+        t.locking_prio = prio[int(pps[i])]
+
 def assign_fp_locking_prios(all_tasks):
     # prioritized in index order
     for i, t in enumerate(all_tasks):
         t.locking_prio = i
+
+def assign_pessimistic_locking_prios(all_tasks):
+    for t in all_tasks:
+        t.locking_prio = 0
 
 # S-aware bounds
 
@@ -108,6 +132,8 @@ def apply_suspension_oblivious(all_tasks, res):
         t.arrival_blocked = res.get_arrival_blocking(i)
         # all blocking, including arrival blocking
         t.blocked   = res.get_blocking_term(i)
+        # Maximum request span
+        t.request_span = res.get_span_term(i)
         # s-oblivious: charge it as execution cost
         t.cost     += t.blocked
 

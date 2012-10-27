@@ -11,7 +11,10 @@ static bool reversed_order(double first, double second) {
     return second < first;
 }
 
-GELPl::GELPl(Scheduler sched, unsigned int num_processors, const TaskSet& ts,
+// This version is for G-FL-split, and assumes that request_span has NOT been
+// added to the WCET yet.
+
+GELPl::GELPl(unsigned int num_processors, const TaskSet& ts,
              unsigned int num_rounds)
 :no_cpus(num_processors), tasks(ts), rounds(num_rounds)
 {
@@ -26,7 +29,7 @@ GELPl::GELPl(Scheduler sched, unsigned int num_processors, const TaskSet& ts,
     S_i.reserve(task_count);
     G_i.reserve(task_count);
 
-    // For faster lookups
+    // Utilizations happen before request span, and for faster lookups
     utilizations.reserve(task_count);
     for (int i = 0; i < task_count; i++) {
         utilizations.push_back(double(tasks[i].get_wcet())
@@ -38,10 +41,7 @@ GELPl::GELPl(Scheduler sched, unsigned int num_processors, const TaskSet& ts,
     // Compute initial priority points, including minimum.
     for (int i = 0; i < task_count; i++) {
         const Task& task = tasks[i];
-        unsigned long new_pp = task.get_deadline();
-        if (sched == GFL) {
-            new_pp -= ((num_processors - 1) * task.get_wcet()) / num_processors;
-        }
+        unsigned long new_pp = task.get_pp();
         pps.push_back(new_pp);
         if (new_pp < min_pp) {
             min_pp = new_pp;
@@ -54,12 +54,15 @@ GELPl::GELPl(Scheduler sched, unsigned int num_processors, const TaskSet& ts,
     for (int i = 0; i < task_count; i++) {
         pps[i] -= min_pp;
         const Task& task = tasks[i];
-        double wcet = double(task.get_wcet());
+        double wcet = double(task.get_wcet()) + double(task.get_request_span());
         double period = double(task.get_period());
-        S_i[i] = std::max(0.0, wcet * (1.0 -  double(pps[i])/ period));
+        S_i[i] = std::max(0.0, task.get_wcet() * (1.0 - 
+	         double(pps[i])/ period));
         S += S_i[i];
-        Y_ints.push_back((0.0 - wcet/no_cpus) * (wcet / period)
-                         + task.get_wcet() - S_i[i]);
+	// Request spans effectively contribute to S as well.
+	S += task.get_request_span();
+        Y_ints.push_back((0.0 - wcet/no_cpus) * (wcet / period) + wcet -
+			 S_i[i]);
     }
 
     double s;
@@ -73,8 +76,11 @@ GELPl::GELPl(Scheduler sched, unsigned int num_processors, const TaskSet& ts,
     for (int i = 0; i < task_count; i++) {
         bounds.push_back(pps[i]
                          + tasks[i].get_wcet()
+			 + tasks[i].get_request_span()
                          + (unsigned long)std::ceil(
-                         s - (double(tasks[i].get_wcet() / double(no_cpus)))));
+                         s - (double(tasks[i].get_wcet()
+			      + tasks[i].get_request_span()) 
+			      / double(no_cpus))));
         G_i.push_back(Y_ints[i] + s * utilizations[i]);
     }
 }

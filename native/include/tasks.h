@@ -18,24 +18,34 @@ class Task
     unsigned long period;
     unsigned long wcet;
     unsigned long deadline;
+    unsigned long request_span;
+    unsigned long pp;
 
   public:
 
     /* construction and initialization */
-    void init(unsigned long wcet, unsigned long period, unsigned long deadline = 0);
+    void init(unsigned long wcet, unsigned long period, unsigned long deadline = 0, unsigned long pp = 0, unsigned long request_span = 0);
     Task(unsigned long wcet = 0,
          unsigned long period = 0,
-         unsigned long deadline = 0) { init(wcet, period, deadline); }
+         unsigned long deadline = 0,
+	 unsigned long pp = 0,
+         unsigned long request_span = 0) { init(wcet, period, deadline, pp,
+                                                  request_span); }
 
     /* getter / setter */
     unsigned long get_period() const { return period;   }
     unsigned long get_wcet() const   { return wcet;     }
     /* defaults to implicit deadline */
     unsigned long get_deadline() const {return deadline; }
+    unsigned long get_request_span() const { return request_span; }
+    unsigned long get_pp() const { return pp; }
 
     void set_period(unsigned long period)     { this->period   = period;   }
     void set_wcet(unsigned long wcet)         { this->wcet     = wcet;     }
     void set_deadline(unsigned long deadline) { this->deadline = deadline; }
+    void set_request_span(unsigned long request_span)
+                           { this->request_span = request_span; }
+    void set_pp(unsigned long pp)             { this->pp = pp; }
 
     /* properties */
     bool has_implicit_deadline() const;
@@ -156,9 +166,9 @@ class TaskSet
     TaskSet(const TaskSet &original);
     virtual ~TaskSet();
 
-    void add_task(unsigned long wcet, unsigned long period, unsigned long deadline = 0)
+    void add_task(unsigned long wcet, unsigned long period, unsigned long deadline = 0, unsigned long pp = 0, unsigned long request_span = 0)
     {
-        tasks.push_back(Task(wcet, period, deadline));
+        tasks.push_back(Task(wcet, period, deadline, request_span));
     }
 
     unsigned int get_task_count() const { return tasks.size(); }

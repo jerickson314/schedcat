@@ -10,7 +10,9 @@
 
 void Task::init(unsigned long wcet,
 		unsigned long period,
-		unsigned long deadline)
+		unsigned long deadline,
+		unsigned long pp,
+		unsigned long request_span)
 {
     this->wcet     = wcet;
     this->period   = period;
@@ -18,6 +20,11 @@ void Task::init(unsigned long wcet,
         this->deadline = period; // implicit
     else
         this->deadline = deadline;
+    if (!pp)
+    	this->pp = deadline;
+    else
+        this->pp = pp;
+    this->request_span = request_span;
 }
 
 bool Task::has_implicit_deadline() const

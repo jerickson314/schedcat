@@ -51,8 +51,17 @@ def charge_scheduling_overheads(oheads, num_cpus, dedicated_irq, taskset):
     n   = len(taskset)
     wss = taskset.max_wss()
 
-    sched = 2 * (oheads.schedule(n) + oheads.ctx_switch(n)) \
+#    has_splits = (len([task for task in taskset if task.split > 1]) > 0)
+#    if len([task for task in taskset if task.split > 1]) > 0:
+#        sched_oh = oheads.schedule(n) + oheads.release(n)
+#    else:
+    sched_oh = oheads.schedule(n)
+
+    sched_first = 2 * (sched_oh + oheads.ctx_switch(n)) \
             + oheads.cache_affinity_loss(wss)
+
+    sched_other = sched_oh + oheads.ctx_switch(n) \
+                  + oheads.cache_affinity_loss(wss)
 
     irq_latency = oheads.release_latency(n)
 
@@ -62,26 +71,37 @@ def charge_scheduling_overheads(oheads, num_cpus, dedicated_irq, taskset):
         unscaled = 2 * cpre
 
     for ti in taskset:
-        ti.period   -= irq_latency / ti.split
-        ti.deadline -= irq_latency / ti.split
+        ti.period   -= irq_latency
+        ti.deadline -= irq_latency
         # Initially, we will work with the fiction that jobs are scheduled
         # without accounting for overheads - the first subjob will then have
         # IPI latency, but other jobs cannot.  Actual scheduler should start
         # the budget with a provided IPI latency, so that all jobs have the
         # same length accounting for overheads.
         split_cost   = ti.cost / ti.split
-        if split_cost < oheads.ipi_latency(n):
-            return False
         # Initially set up all jobs to have the basic overheads, but no IPI
         # delay.
-        first_cost   = (split_cost + sched) / uscale + 2 * cpre
-        other_cost   = first_cost
+        first_cost   = (split_cost + sched_first) / uscale + 2 * cpre
+        # Technically release latency cost applies only to non-final subjobs
+        # rather than non-initial, but other_cost will be counted s_i - 1 times.
+        other_cost   = (split_cost + sched_other) / uscale \
+                        + cpre
+        if split_cost < ((ti.split - 1) / ti.split * \
+                         (uscale * oheads.ipi_latency(n) + \
+                          uscale * cpre + \
+                          sched_first - sched_other)):
+            return False
         # Account for the fact that first job can have IPI delay, though others
         # cannot.
         if dedicated_irq or num_cpus > 1:
             first_cost += oheads.ipi_latency(n)
         ti.cost      = first_cost + (ti.split - 1) * other_cost
-        if ti.density() > 1:
+        if hasattr(ti, 'request_span'):
+            if ti.split > 1:
+                ti.request_span = ti.request_span / uscale
+            else:
+                ti.request_span = 0
+        if ti.utilization() > 1:
             return False
 
     return taskset
@@ -94,6 +114,8 @@ def quantize_params(taskset):
         t.cost     = int(ceil(t.cost))
         t.period   = int(floor(t.period))
         t.deadline = int(floor(t.deadline))
+        if hasattr(t, 'request_span'):
+            t.request_span = int(ceil(t.request_span))
         if t.density() > 1:
             return False
 

@@ -13,7 +13,7 @@ static bool reversed_order(const fractional_t& first,
     return second < first;
 }
 
-GELPl::GELPl(Scheduler sched, unsigned int num_processors, const TaskSet& ts,
+GELPl::GELPl(unsigned int num_processors, const TaskSet& ts,
              unsigned int num_rounds)
 :no_cpus(num_processors), tasks(ts), rounds(num_rounds)
 {
@@ -48,10 +48,7 @@ GELPl::GELPl(Scheduler sched, unsigned int num_processors, const TaskSet& ts,
     // Compute initial priority points, including minimum.
     for (int i = 0; i < task_count; i++) {
         const Task& task = tasks[i];
-        unsigned long new_pp = task.get_deadline();
-        if (sched == GFL) {
-            new_pp -= ((num_processors - 1) * task.get_wcet()) / num_processors;
-        }
+        unsigned long new_pp = task.get_pp();
         pps.push_back(new_pp);
         if (new_pp < min_pp) {
             min_pp = new_pp;

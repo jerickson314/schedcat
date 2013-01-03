@@ -6,6 +6,7 @@
 #include <limits>
 #include <algorithm>
 #include <cmath>
+<<<<<<< HEAD
 
 static bool reversed_order(double first, double second) {
     return second < first;
@@ -14,13 +15,29 @@ static bool reversed_order(double first, double second) {
 // This version is for G-FL-split, and assumes that request_span has NOT been
 // added to the WCET yet.
 
+=======
+#include <iostream>
+
+static bool reversed_order(const fractional_t& first,
+                           const fractional_t& second) {
+    return second < first;
+}
+
 GELPl::GELPl(unsigned int num_processors, const TaskSet& ts,
              unsigned int num_rounds)
 :no_cpus(num_processors), tasks(ts), rounds(num_rounds)
 {
+    fractional_t sys_utilization;
+    tasks.get_utilization(sys_utilization);
+    // Compute ceiling
+    integral_t util_ceil_pre = sys_utilization.get_num();
+    mpz_cdiv_q(util_ceil_pre.get_mpz_t(),
+               sys_utilization.get_num().get_mpz_t(),
+               sys_utilization.get_den().get_mpz_t());
+    util_ceil = util_ceil_pre.get_ui();
     std::vector<unsigned long> pps;
-    double S;
-    std::vector<double> Y_ints;
+    fractional_t S = 0;
+    std::vector<fractional_t> Y_ints;
 
     int task_count = tasks.get_task_count();
     // Reserve capacity in all vectors to minimize allocation costs.
@@ -32,8 +49,8 @@ GELPl::GELPl(unsigned int num_processors, const TaskSet& ts,
     // Utilizations happen before request span, and for faster lookups
     utilizations.reserve(task_count);
     for (int i = 0; i < task_count; i++) {
-        utilizations.push_back(double(tasks[i].get_wcet())
-                               / double(tasks[i].get_period()));
+        utilizations.push_back(tasks[i].get_wcet());
+        utilizations[i] /= tasks[i].get_period();
     }
     
     unsigned long min_pp = std::numeric_limits<unsigned long>::max();
@@ -50,42 +67,61 @@ GELPl::GELPl(unsigned int num_processors, const TaskSet& ts,
 
     // Reduce to compute minimum.  Also compute Y intercepts, S_i values, and
     // S.
-    S = 0.0;
     for (int i = 0; i < task_count; i++) {
         pps[i] -= min_pp;
         const Task& task = tasks[i];
-        double wcet = double(task.get_wcet()) + double(task.get_request_span());
-        double period = double(task.get_period());
-        S_i[i] = std::max(0.0, task.get_wcet() * (1.0 - 
-	         double(pps[i])/ period));
-        S += S_i[i];
-	// Request spans effectively contribute to S as well.
-	S += task.get_request_span();
-        Y_ints.push_back((0.0 - wcet/no_cpus) * (wcet / period) + wcet -
-			 S_i[i]);
+        unsigned long wcet = task.get_wcet() + task.get_request_span();
+        unsigned long period = task.get_period();
+        S_i.push_back(pps[i]);
+        fractional_t& S_i_i = S_i[i];
+        S_i_i *= -1;
+        S_i_i /= period;
+        S_i_i += 1;
+        S_i_i *= wcet;
+        if (S_i_i < 0) {
+            S_i_i = 0;
+        }
+        S += S_i_i;
+        Y_ints.push_back(wcet);
+        fractional_t& Y_ints_i = Y_ints[i];
+        Y_ints_i *= -1;
+        Y_ints_i /= no_cpus;
+        Y_ints_i *= utilizations[i];
+        Y_ints_i += wcet;
+        Y_ints_i -= S_i_i;
     }
 
-    double s;
+    fractional_t s;
     if (rounds == 0) {
-        s = compute_exact_s(S, Y_ints);
+        compute_exact_s(S, Y_ints, s);
     }
     else {
-        s = compute_binsearch_s(S, Y_ints);
+        compute_binsearch_s(S, Y_ints, s);
     }
 
     for (int i = 0; i < task_count; i++) {
+        fractional_t x_i = s;
+        fractional_t x_comp = tasks[i].get_wcet() + tasks[i].get_request_span();
+        x_comp /= no_cpus;
+        x_i -= x_comp;
+        // Compute ceiling
+        integral_t xi_ceil = x_i.get_num();
+        mpz_cdiv_q(xi_ceil.get_mpz_t(),
+                   x_i.get_num().get_mpz_t(),
+                   x_i.get_den().get_mpz_t());
         bounds.push_back(pps[i]
                          + tasks[i].get_wcet()
-			 + tasks[i].get_request_span()
-                         + (unsigned long)std::ceil(
-                         s - (double(tasks[i].get_wcet()
-			      + tasks[i].get_request_span()) 
-			      / double(no_cpus))));
-        G_i.push_back(Y_ints[i] + s * utilizations[i]);
+                         + tasks[i].get_request_span()
+                         + xi_ceil.get_ui());
+        G_i.push_back(s);
+        G_i[i] *= utilizations[i];
+        G_i[i] += Y_ints[i];
     }
 }
 
-double GELPl::compute_exact_s(double S, const std::vector<double>& Y_ints) {
+void GELPl::compute_exact_s(const fractional_t& S,
+                            const std::vector<fractional_t>& Y_ints,
+                            fractional_t& s) {
     int task_count = tasks.get_task_count();
 
     std::vector<ReplacementType> replacements;
@@ -94,19 +130,22 @@ double GELPl::compute_exact_s(double S, const std::vector<double>& Y_ints) {
             // We can ignore parallel and identical lines - either don't
             // intersect or we don't care which is picked.
             if (utilizations[i] != utilizations[j]) {
-                double intersect = (Y_ints[j] - Y_ints[i])
-                                   / (utilizations[i] - utilizations[j]);
+                fractional_t intersect_den = utilizations[i];
+                intersect_den -= utilizations[j];
+                fractional_t intersect = Y_ints[j];
+                intersect -= Y_ints[i];
+                intersect /= intersect_den;
                 ReplacementType replacement;
                 replacement.location = intersect;
-                if (intersect >= 0.0) {
+                if (intersect >= 0) {
                     if (utilizations[i] < utilizations[j]) {
                         replacement.old_task = i;
-			replacement.old_task_utilization = utilizations[i];
+                        replacement.old_task_utilization = utilizations[i];
                         replacement.new_task = j;
                     }
                     else {
                         replacement.old_task = j;
-			replacement.old_task_utilization = utilizations[j];
+                        replacement.old_task_utilization = utilizations[j];
                         replacement.new_task = i;
                     }
                     replacements.push_back(replacement);
@@ -119,40 +158,51 @@ double GELPl::compute_exact_s(double S, const std::vector<double>& Y_ints) {
     std::vector<bool> task_pres;
     task_pres.assign(task_count, false);
     
-    double current_value = S;
-    double current_slope = -1 * no_cpus;
+    fractional_t current_value = S;
+    fractional_t current_slope = no_cpus;
+    current_slope *= -1;
 
     std::vector<TaggedValue> init_pairs;
     init_pairs.reserve(task_count);
     for (int i = 0; i < task_count; i++) {
     	TaggedValue new_pair;
-	new_pair.task = i;
-	new_pair.value = Y_ints[i];
+        new_pair.task = i;
+        new_pair.value = Y_ints[i];
         init_pairs.push_back(new_pair);
     }
     
-    // Allows us to efficiently compute sum of top m-1 elements.  They may not
-    // be in order but must be the correct choices.
-    std::nth_element(init_pairs.begin(), init_pairs.begin() + no_cpus - 2,
-                     init_pairs.end());
+    // Only if we have tasks contributing to G
+    if (util_ceil >= 2) {
+        // Allows us to efficiently compute sum of top m-1 elements.  They may
+        // not be in order but must be the correct choices.
+        std::nth_element(init_pairs.begin(),
+                         init_pairs.begin() + util_ceil - 2,
+                         init_pairs.end());
 
-    for (int i = 0; i < no_cpus - 1; i++) {
-        unsigned int task_index = init_pairs[i].task;
-        task_pres[task_index] = true;
-        current_value += init_pairs[i].value;
-        current_slope += utilizations[task_index];
+        for (int i = 0; i < util_ceil - 1; i++) {
+            unsigned int task_index = init_pairs[i].task;
+            task_pres[task_index] = true;
+            current_value += init_pairs[i].value;
+            current_slope += utilizations[task_index];
+        }
     }
     
     unsigned int rindex = 0;
-    double next_s = 0.0;
-    double zero = std::numeric_limits<double>::infinity();
-    while (zero > next_s) {
-        double current_s = next_s;
-        zero = current_s - current_value / current_slope;
+    fractional_t next_s = 0;
+    s = 1;
+    while (s > next_s) {
+        fractional_t current_s = next_s;
+        s = current_value;
+        s /= current_slope;
+        s *= -1;
+        s += current_s;
         if (rindex < replacements.size()) {
             ReplacementType replacement = replacements[rindex];
             next_s = replacement.location;
-            current_value += (next_s - current_s) * current_slope;
+            fractional_t val_inc = next_s;
+            val_inc -= current_s;
+            val_inc *= current_slope;
+            current_value += val_inc;
             // Apply replacement, if appropriate
             if (task_pres[replacement.old_task]
                     && !task_pres[replacement.new_task]) {
@@ -164,23 +214,28 @@ double GELPl::compute_exact_s(double S, const std::vector<double>& Y_ints) {
             rindex++;
         }
         else {
-            next_s = std::numeric_limits<double>::infinity();
+            next_s = s;
+            next_s += 1;
         }
     }
-    return zero;
+    // At this point, "s" should be the appropriate return value
 }
 
-double GELPl::compute_binsearch_s(double S, const std::vector<double>& Y_ints) {
-    double min_s = 0.0;
-    double max_s = 1.0;
-    while (compute_M(max_s, S, Y_ints) > 0) {
+void GELPl::compute_binsearch_s(const fractional_t& S,
+                                const std::vector<fractional_t>& Y_ints,
+                                fractional_t& s) {
+    fractional_t min_s = 0;
+    fractional_t max_s = 1;
+    while (!M_lt_0(max_s, S, Y_ints)) {
         min_s = max_s;
-        max_s *= 2.0;
+        max_s *= 2;
     }
     
     for (int i = 0; i < rounds; i++) {
-        double middle = (min_s + max_s) / 2.0;
-        if (compute_M(middle, S, Y_ints) < 0) {
+        fractional_t middle = min_s;
+        middle += max_s;
+        middle /= 2;
+        if (M_lt_0(middle, S, Y_ints)) {
             max_s = middle;
         }
         else {
@@ -189,24 +244,35 @@ double GELPl::compute_binsearch_s(double S, const std::vector<double>& Y_ints) {
     }
 
     // max_s is guaranteed to be a legal bound.
-    return max_s;
+    s = max_s;
 }
 
-double GELPl::compute_M(double s, double S, const std::vector<double>& Y_ints) {
-    std::vector<double> Gvals;
+bool GELPl::M_lt_0(const fractional_t& s, const fractional_t& S,
+                   const std::vector<fractional_t>& Y_ints) {
+    std::vector<fractional_t> Gvals;
     int task_count = tasks.get_task_count();
     for (int i = 0; i < task_count; i++) {
-        Gvals.push_back(Y_ints[i] + utilizations[i] * s);
+        Gvals.push_back(utilizations[i]);
+        Gvals[i] *= s;
+        Gvals[i] += Y_ints[i];
     }
 
-    // Again, more efficient computation by not totally sorting.
-    std::nth_element(Gvals.begin(), Gvals.begin() + no_cpus - 2, Gvals.end(),
-                     reversed_order);
-    double to_return = S - no_cpus * s;
+    fractional_t final_val = no_cpus;
+    final_val *= -1;
+    final_val *= s;
+    final_val += S;
     
-    for (int i = 0; i < no_cpus - 1; i++) {
-        to_return += Gvals[i];
+    // Only if there will be tasks contributing to G
+    if (util_ceil >= 2) {
+        // Again, more efficient computation by not totally sorting.
+        std::nth_element(Gvals.begin(),
+                         Gvals.begin() + util_ceil - 2,
+                         Gvals.end(),
+                         reversed_order);
+        for (int i = 0; i < util_ceil - 1; i++) {
+            final_val += Gvals[i];
+        }
     }
 
-    return to_return;
+    return (final_val < 0);
 }

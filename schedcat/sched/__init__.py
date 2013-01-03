@@ -16,7 +16,7 @@ try:
             if hasattr(t, 'request_span'):
                 ts.add_task(t.cost, t.period, t.deadline, pp, t.request_span)
             else:
-                ts.add_task(t.cost, t.period, t.pp, t.deadline)
+                ts.add_task(t.cost, t.period, t.deadline, t.pp)
         return ts
 
 except ImportError:

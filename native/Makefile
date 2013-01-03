@@ -19,6 +19,7 @@ DISABLED_WARNINGS += -Wno-deprecated       # We still use ext::hash_map<>.
 
 INCLUDES = -Iinclude -I${GMP_PATH}/include
 LIBS     = -L${GMP_PATH}/lib -lgmp -lgmpxx
+DEFS    ?=
 
 OS := $(shell uname)
 
@@ -36,22 +37,34 @@ PYTHON_LIB ?=
 SOFLAGS     = -shared
 endif
 
-CXXFLAGS  = -Wall -Wextra $(DISABLED_WARNINGS) -fPIC $(INCLUDES)
-LDFLAGS   = $(LIBS)
-SWIGFLAGS = -python -c++ -outdir . -includeall -Iinclude
-
-ifeq ($(DEBUG),y)
-CXXFLAGS += -g -DDEBUG
-else
-CXXFLAGS += -O2 -DNDEBUG
+# Support for clock_gettime()
+ifeq ($(OS),Linux)
+LIBS += -lrt
 endif
 
+
+# #### Debug support ####
+ifeq ($(DEBUG),y)
+DEFS += -g -DDEBUG
+else
+DEFS += -O2
+endif
+
+# disable assertions only if explicitly requested
+ifeq ($(DEBUG),n)
+DEFS += -DNDEBUG
+endif
+
+CXXFLAGS  = -Wall -Wextra -Werror $(DISABLED_WARNINGS) -fPIC $(INCLUDES) $(DEFS)
+LDFLAGS   = $(LIBS)
+SWIGFLAGS = -python -c++ -outdir . -includeall -Iinclude
 vpath %.cc interface
 vpath %.cpp src src/edf src/blocking
 
 # #### Common C++ source files ####
 
-EDF_OBJ   = baker.o baruah.o gfb.o bcl.o bcl_iterative.o rta.o ffdbf.o gedf.o gel_pl.o load.o cpu_time.o
+EDF_OBJ   = baker.o baruah.o gfb.o bcl.o bcl_iterative.o rta.o
+EDF_OBJ  += ffdbf.o gedf.o gel_pl.o load.o cpu_time.o qpa.o
 SCHED_OBJ = sim.o schedule_sim.o
 CORE_OBJ  = tasks.o
 SYNC_OBJ  = sharedres.o dpcp.o mpcp.o
@@ -80,13 +93,13 @@ interface/%_wrap.cc: interface/%.i
 	$(SWIG) $(SWIGFLAGS) -o $@ $<
 
 interface/%_wrap.o: interface/%_wrap.cc
-	$(CXX) -fPIC $(PYTHON_INC) -c -o $@ $+ $(INCLUDES) 
+	$(CXX) -fPIC $(PYTHON_INC) -c -o $@ $+ $(INCLUDES)
 
 _sched.so: ${CORE_OBJ} ${EDF_OBJ} interface/sched_wrap.o
-	$(CXX) $(SOFLAGS) $(PYTHON_LIB) -o $@ $+ $(LDFLAGS) 
+	$(CXX) $(SOFLAGS) $(PYTHON_LIB) -o $@ $+ $(LDFLAGS)
 
 _locking.so: ${SYNC_OBJ} interface/locking_wrap.o
-	$(CXX) $(SOFLAGS) $(PYTHON_LIB) -o $@ $+ $(LDFLAGS) 
+	$(CXX) $(SOFLAGS) $(PYTHON_LIB) -o $@ $+ $(LDFLAGS)
 
 _sim.so: ${CORE_OBJ} ${SCHED_OBJ} interface/sim_wrap.o
-	$(CXX) $(SOFLAGS) $(PYTHON_LIB) -o $@ $+ $(LDFLAGS) 
+	$(CXX) $(SOFLAGS) $(PYTHON_LIB) -o $@ $+ $(LDFLAGS)

@@ -11,6 +11,8 @@ from __future__ import division
 
 from math import ceil
 
+from fractions import Fraction
+
 from schedcat.util.quantor import forall
 
 import schedcat.sched
@@ -54,9 +56,9 @@ def compute_gedf_response_details(no_cpus, tasks, rounds):
     return compute_response_details(no_cpus, tasks, rounds)
 
 def compute_response_details(no_cpus, tasks, rounds):
-    if (no_cpus == 1):
+    if (no_cpus == 1) and forall(tasks)(lambda t: t.pp == t.period):
         details = AnalysisDetails(tasks)
-        details.bounds = [task.deadline for task in tasks]
+        details.bounds = [task.period for task in tasks]
         details.S_i = [0.0 for task in tasks]
         details.G_i = [0.0 for task in tasks]
         return details
@@ -66,7 +68,6 @@ def compute_response_details(no_cpus, tasks, rounds):
         return AnalysisDetails(tasks, gel_obj)
     else:
         return compute_response_bounds(no_cpus, tasks, rounds)
-    
 
 def compute_response_bounds(no_cpus, tasks, rounds):
     """This function computes response time bounds for the given set of tasks
@@ -76,53 +77,60 @@ def compute_response_bounds(no_cpus, tasks, rounds):
 
     if not has_bounded_tardiness(no_cpus, tasks):
         return None
+
+    # Compute utilization ceiling
+    util_ceil = int(ceil(tasks.utilization_q()))
     # First uniformly reduce scheduler priority points to derive analysis
     # priority points.  Due to uniform reduction, does not change scheduling
     # decisions.  Shown in EA'12 to improve bounds.
-    sched_pps = [task.pp for task in sched]
+    sched_pps = [task.pp for task in tasks]
     min_priority_point = min(sched_pps)
     analysis_pps = [sched_pps[i] - min_priority_point
                     for i in range(len(sched_pps))]
 
     #Initialize S_i and Y_ints
-    S_i = [0]*len(tasks)
-    Y_ints = [0]*len(tasks)
-    task_costs = [0]*len(tasks)
+    S_i = [Fraction(0)]*len(tasks)
+    Y_ints = [Fraction(0)]*len(tasks)
+    utilizations = [Fraction(task.cost, task.period) for task in tasks];
+    task_costs = [Fraction(0)]*len(tasks)
     # Calculate S_i and y-intercept (for G(\vec{x}) contributors)
     for i, task in enumerate(tasks):
-        task_costs[i] = task.cost
+        task_costs[i] = Fraction(task.cost)
         if hasattr(task, 'request_span'):
-            task_costs[i] += task.request_span
-        S_i[i] = max(0, task_costs[i] * (1 - analysis_pps[i] / task.period))
-        Y_ints[i] = (0 - task_cost / no_cpus) * task.utilization() + \
-                    task_costs[i] - S_i[i]
+            task_costs[i] += Fraction(task.request_span)
+        S_i[i] = max(Fraction(0), task_costs[i] * (Fraction(1)
+                     - Fraction(analysis_pps[i], task.period)))
+        Y_ints[i] = (Fraction(0) - Fraction(task_costs[i], no_cpus)) * \
+                     utilizations[i] + task_costs[i] - S_i[i]
 
     if rounds == 0:
-        s = compute_exact_s(no_cpus, tasks, sum(S_i), Y_ints)
+        s = compute_exact_s(no_cpus, tasks, util_ceil, sum(S_i), Y_ints,
+                            utilizations)
     else:
-        s = compute_binsearch_s(no_cpus, tasks, sum(S_i), Y_ints, rounds)
+        s = compute_binsearch_s(no_cpus, tasks, util_ceil, sum(S_i), Y_ints,
+                                utilizations, rounds)
 
     details = AnalysisDetails(tasks)
-    details.bounds = [int(ceil(s - task_costs[i] / no_cpus + task_costs[i]
-                      + analysis_pps[i]))
+    details.bounds = [int(ceil(s - Fraction(task_costs[i], no_cpus) + 
+                      Fraction(tasks[i].cost) + Fraction(analysis_pps[i])))
                       for i in range(len(tasks))]
     details.S_i = S_i
-    details.G_i = [Y_ints[i] + s * tasks[i].utilization()
+    details.G_i = [Y_ints[i] + s * utilizations[i]
                    for i in range(len(tasks))]
     return details
 
-def compute_exact_s(no_cpus, tasks, S, Y_ints):
+def compute_exact_s(no_cpus, tasks, util_ceil, S, Y_ints, utilizations):
     replacements = []
     for i, task1 in enumerate(tasks):
         for j in range(i+1, len(tasks)):
             task2 = tasks[j]
             # Parallel lines do not intersect, and choice of identical lines
             # doesn't matter.  Ignore all such cases.
-            if task1.utilization() != task2.utilization():
-                intersect = (Y_ints[j] - Y_ints[i]) \
-                            / (task1.utilization() - task2.utilization())
-                if intersect >= 0.0:
-                    if task1.utilization() < task2.utilization():
+            if utilizations[i] != utilizations[j]:
+                intersect = Fraction(Y_ints[j] - Y_ints[i],
+                                     utilizations[i] - utilizations[j])
+                if intersect >= 0:
+                    if utilizations[i] < utilizations[j]:
                         replacements.append( (intersect, i, j) )
                     else:
                         replacements.append( (intersect, j, i) )
@@ -136,7 +144,7 @@ def compute_exact_s(no_cpus, tasks, S, Y_ints):
     #
     # However, proper behavior should include A and B in considered set.  The
     # tie break avoids this case.
-    replacements.sort(key=lambda r: (r[0], tasks[r[1]].utilization()))
+    replacements.sort(key=lambda r: (r[0], utilizations[r[1]]))
 
     # The piecewise linear function we are tracing is G(s) + S(\tau) - ms, as
     # discussed (with L(s) in place of G(s)) in EGB'10.  We start at s = 0 and
@@ -149,24 +157,24 @@ def compute_exact_s(no_cpus, tasks, S, Y_ints):
     
     # Initial value and slope.
     current_value = S
-    current_slope = -1 * no_cpus
+    current_slope = Fraction(-1 * no_cpus)
 
-    init_pairs = heapq.nlargest(no_cpus - 1, enumerate(Y_ints),
+    init_pairs = heapq.nlargest(util_ceil - 1, enumerate(Y_ints),
                                 key=lambda p: p[1])
 
     # For s = 0, just use Y-intercepts to determine what is present.
     for pair in init_pairs:
         task_pres[pair[0]] = True
         current_value += pair[1]
-        current_slope += tasks[pair[0]].utilization()
+        current_slope += utilizations[pair[0]]
 
     # Index of the next replacement
     rindex = 0
-    next_s = 0.0
-    zero = float("inf")
+    next_s = Fraction(0)
+    zero = next_s + Fraction(1)
     while zero > next_s:
         current_s = next_s
-        zero = current_s - current_value / current_slope
+        zero = current_s - Fraction(current_value, current_slope)
         if rindex < len(replacements):
             replacement = replacements[rindex]
             next_s = replacement[0]
@@ -174,29 +182,30 @@ def compute_exact_s(no_cpus, tasks, S, Y_ints):
             # Apply replacement, if appropriate.
             if task_pres[replacement[1]] and not task_pres[replacement[2]]:
                 task_pres[replacement[1]] = False
-                current_slope -= tasks[replacement[1]].utilization()
+                current_slope -= utilizations[replacement[1]]
                 task_pres[replacement[2]] = True
-                current_slope += tasks[replacement[2]].utilization()
+                current_slope += utilizations[replacement[2]]
             rindex += 1
         else:
-            next_s = float("inf")
+            next_s = zero + 1
     return zero
 
-def compute_binsearch_s(no_cpus, tasks, S, Y_ints, rounds):
+def compute_binsearch_s(no_cpus, tasks, util_ceil, S, Y_ints, utilizations,
+                        rounds):
     def M(s):
-        Gvals = heapq.nlargest(no_cpus - 1,
-                               [Y_ints[i] + tasks[i].utilization() * s
+        Gvals = heapq.nlargest(util_ceil - 1,
+                               [Y_ints[i] + utilizations[i] * s
                                 for i in range(len(tasks))])
-        return sum(Gvals) + S - no_cpus * s
+        return sum(Gvals) + S - Fraction(no_cpus) * s
 
-    min_s = 0.0
-    max_s = 1.0
+    min_s = Fraction(0)
+    max_s = Fraction(1)
     while M(max_s) > 0:
         min_s = max_s
-        max_s *= 2.0
+        max_s *= Fraction(2)
 
     for i in range(rounds):
-        middle = (max_s + min_s) / 2.0
+        middle = Fraction(max_s + min_s, 2)
         if M(middle) < 0:
             max_s = middle
         else:
@@ -212,15 +221,15 @@ def has_bounded_tardiness(no_cpus, tasks):
 def bound_gedf_response_times(no_cpus, tasks, rounds):
     response_details = compute_gedf_response_details(no_cpus, tasks, rounds)
 
-    return bound_response_times(no_cpus, tasks, response_details)
+    return bound_response_times(tasks, response_details)
 
 def bound_gfl_response_times(no_cpus, tasks, rounds):
     response_details = compute_gfl_response_details(no_cpus, tasks, rounds)
 
-    return bound_response_times(no_cpus, tasks, response_details)
+    return bound_response_times(tasks, response_details)
 
-def bound_response_times(no_cpus, tasks, response_details):
-    if response_details is None or not has_bounded_tardiness(no_cpus, tasks):
+def bound_response_times(tasks, response_details):
+    if response_details is None:
         return False
 
     else:

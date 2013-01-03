@@ -28,7 +28,7 @@ class Task
     Task(unsigned long wcet = 0,
          unsigned long period = 0,
          unsigned long deadline = 0,
-	 unsigned long pp = 0,
+         unsigned long pp = 0,
          unsigned long request_span = 0) { init(wcet, period, deadline, pp,
                                                   request_span); }
 
@@ -166,7 +166,9 @@ class TaskSet
     TaskSet(const TaskSet &original);
     virtual ~TaskSet();
 
-    void add_task(unsigned long wcet, unsigned long period, unsigned long deadline = 0, unsigned long pp = 0, unsigned long request_span = 0)
+    void add_task(unsigned long wcet, unsigned long period,
+                  unsigned long deadline = 0, unsigned long pp = 0,
+                  unsigned long request_span = 0)
     {
         tasks.push_back(Task(wcet, period, deadline, request_span));
     }
@@ -186,6 +188,7 @@ class TaskSet
     void get_density(fractional_t &density) const;
     void get_max_density(fractional_t &max_density) const;
 
+    void bound_demand(const integral_t &time, integral_t &demand) const;
     void approx_load(fractional_t &load, const fractional_t &epsilon = 0.1) const;
 
     /* wrapper for Python access */

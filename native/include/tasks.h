@@ -170,7 +170,7 @@ class TaskSet
                   unsigned long deadline = 0, unsigned long pp = 0,
                   unsigned long request_span = 0)
     {
-        tasks.push_back(Task(wcet, period, deadline, request_span));
+        tasks.push_back(Task(wcet, period, deadline, pp, request_span));
     }
 
     unsigned int get_task_count() const { return tasks.size(); }

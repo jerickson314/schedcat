@@ -6,16 +6,6 @@
 #include <limits>
 #include <algorithm>
 #include <cmath>
-<<<<<<< HEAD
-
-static bool reversed_order(double first, double second) {
-    return second < first;
-}
-
-// This version is for G-FL-split, and assumes that request_span has NOT been
-// added to the WCET yet.
-
-=======
 #include <iostream>
 
 static bool reversed_order(const fractional_t& first,
@@ -23,6 +13,8 @@ static bool reversed_order(const fractional_t& first,
     return second < first;
 }
 
+// This version is for G-FL-split, and assumes that request_span has NOT been
+// added to the WCET yet.
 GELPl::GELPl(unsigned int num_processors, const TaskSet& ts,
              unsigned int num_rounds)
 :no_cpus(num_processors), tasks(ts), rounds(num_rounds)

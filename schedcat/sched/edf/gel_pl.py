@@ -112,7 +112,8 @@ def compute_response_bounds(no_cpus, tasks, rounds):
 
     details = AnalysisDetails(tasks)
     details.bounds = [int(ceil(s - Fraction(task_costs[i], no_cpus) + 
-                      Fraction(tasks[i].cost) + Fraction(analysis_pps[i])))
+                      Fraction(tasks[i].cost) + Fraction(tasks[i].request_span)
+                      + Fraction(analysis_pps[i])))
                       for i in range(len(tasks))]
     details.S_i = S_i
     details.G_i = [Y_ints[i] + s * utilizations[i]

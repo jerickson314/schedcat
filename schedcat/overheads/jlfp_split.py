@@ -24,7 +24,7 @@ def preemption_centric_irq_costs(oheads, dedicated_irq, taskset):
 
     # tick interrupt
     utick = tck / qlen
-    
+
     urel  = 0.0
     if not dedicated_irq:
         rel   = oheads.release(n)
@@ -32,11 +32,12 @@ def preemption_centric_irq_costs(oheads, dedicated_irq, taskset):
             urel += (rel / ti.period)
 
     # cost of preemption
-    cpre = tck + ev_lat * utick
+    cpre_numerator = tck + ev_lat * utick
     if not dedicated_irq:
-        cpre += n * rel + ev_lat * urel
+        cpre_numerator += n * rel + ev_lat * urel
 
-    return (1.0 - utick - urel, cpre)
+    uscale = 1.0 - utick - urel
+    return (uscale, cpre_numerator / uscale)
 
 def charge_scheduling_overheads(oheads, num_cpus, dedicated_irq, taskset):
     if not oheads:
@@ -65,8 +66,13 @@ def charge_scheduling_overheads(oheads, num_cpus, dedicated_irq, taskset):
 
     irq_latency = oheads.release_latency(n)
 
-    if dedicated_irq or num_cpus > 1:
+    ipi_rel_cost = 0
+    if dedicated_irq:
+        unscaled = 2 * cpre + oheads.ipi_latency(n) + oheads.release(n)
+        ipi_rel_cost = oheads.ipi_latency(n) + oheads.release(n)
+    elif num_cpus > 1:
         unscaled = 2 * cpre + oheads.ipi_latency(n)
+        ipi_rel_cost = oheads.ipi_latency(n)
     else:
         unscaled = 2 * cpre
 
@@ -87,14 +93,13 @@ def charge_scheduling_overheads(oheads, num_cpus, dedicated_irq, taskset):
         other_cost   = (split_cost + sched_other) / uscale \
                         + cpre
         if split_cost < ((ti.split - 1) / ti.split * \
-                         (uscale * oheads.ipi_latency(n) + \
+                         (uscale * ipi_rel_cost + \
                           uscale * cpre + \
                           sched_first - sched_other)):
             return False
         # Account for the fact that first job can have IPI delay, though others
         # cannot.
-        if dedicated_irq or num_cpus > 1:
-            first_cost += oheads.ipi_latency(n)
+        first_cost += ipi_rel_cost
         ti.cost      = first_cost + (ti.split - 1) * other_cost
         if hasattr(ti, 'request_span'):
             if ti.split > 1:

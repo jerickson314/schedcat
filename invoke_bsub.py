@@ -17,4 +17,4 @@ for period_name in distributions:
     for util_name in by_util:
         cluster_size = 24
         for cap in [cluster_size / 20 * i for i in range(1, 21)]:
-            os.system("bsub /netscr/jpericks/schedcat/gen_dat.py {0} {1} {2}".format(util_name, period_name, str(cap))
+            os.system("bsub /netscr/jpericks/schedcat/gen_dat.py {0} {1} {2}".format(util_name, period_name, str(cap)))

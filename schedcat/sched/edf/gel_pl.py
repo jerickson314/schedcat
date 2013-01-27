@@ -56,7 +56,8 @@ def compute_gedf_response_details(no_cpus, tasks, rounds):
     return compute_response_details(no_cpus, tasks, rounds)
 
 def compute_response_details(no_cpus, tasks, rounds):
-    if (no_cpus == 1) and forall(tasks)(lambda t: t.pp == t.period):
+    if (len(tasks) <= no_cpus) or \
+            ((no_cpus == 1) and forall(tasks)(lambda t: t.pp == t.period)):
         details = AnalysisDetails(tasks)
         details.bounds = [task.period for task in tasks]
         details.S_i = [0.0 for task in tasks]

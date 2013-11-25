@@ -174,7 +174,7 @@ def get_lock_task_systems(util_dist, period_dist, util_cap, cslength, nres,
 def partition_tasks(heur_func, cluster_size, clusters, dedicated_irq, taskset):
     first_cap = cluster_size - 1 if dedicated_irq else cluster_size
     first_bin = Bin(size=SporadicTask.utilization, capacity=first_cap)
-    other_bins = [Bin(size=SporadicTask.utilization, capacity=first_cap) for _ in xrange(1, clusters)]
+    other_bins = [Bin(size=SporadicTask.utilization, capacity=cluster_size) for _ in xrange(1, clusters)]
     
     heuristic = heur_func(initial_bins=[first_bin] + other_bins)
 

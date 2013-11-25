@@ -18,13 +18,14 @@ import sys
 import os
 import re
 
-ohead_root = "/playpen/jerickso/bbbdiss/ohead-data/diss/"
+ohead_root = "/home/jerickso/ohead-data/"
 
 class Scheduler:
     def __init__(self, name, cluster_size, num_clusters, dedicated_irq,
                  cache_level, lock_type):
         self.name = name
         self.oh_file = ohead_root + "oh_host=ludwig_scheduler={0}_stat=avg.new.csv".format(name)
+        self.unsplit_oh_file = ohead_root + "unsplit/oh_host=ludwig_scheduler={0}_stat=avg.new.csv".format(name)
         self.pmo_file = ohead_root + "pmo_host=ludwig_background=load_stat=avg.csv"
         self.cluster_size = cluster_size
         self.num_clusters = num_clusters
@@ -33,7 +34,8 @@ class Scheduler:
         self.lock_type = lock_type
         if self.lock_type is not None:
             self.lock_oh_file = ohead_root + "oh_host=ludwig_scheduler={0}_locks={1}_stat=avg.new.csv".format(name, lock_type)
-            self.syscall_oh_file = ohead_root + "oh_host=ludwig_scheduler={0}_locks=OMLP_stat=avg.new.csv".format(name)
+            self.unsplit_lock_oh_file = ohead_root + "unsplit/oh_host=ludwig_scheduler={0}_locks={1}_stat=avg.new.csv".format(name, lock_type)
+#            self.syscall_oh_file = ohead_root + "oh_host=ludwig_scheduler={0}_locks=OMLP_stat=avg.new.csv".format(name)
             if self.lock_type is "OMLP":
                 self.spinlock = False
             else:
@@ -63,6 +65,8 @@ class DataCollector:
         self.improvement_denominators = {}
         self.raw_nonsplit_numerators = {}
         self.raw_split_numerators = {}
+        self.ave_splits_numerators = {}
+        self.max_splits_numerators = {}
 
     def get_sub_hash(self, parent_hash, set_name):
         if set_name not in parent_hash:
@@ -76,7 +80,7 @@ class DataCollector:
         wss_map[wss] += value
 
     def report_data_point(self, scheduler, task_system, wss, nonsplit_maxtard,
-                          split_maxtard):
+                          split_maxtard, ave_splits, max_splits):
         sched_name = scheduler.name + "_" + task_system.util_dist + "_" \
                      + task_system.period_dist + "_" + str(task_system.util_cap)
         if scheduler.lock_type is not None:
@@ -91,6 +95,10 @@ class DataCollector:
                               nonsplit_maxtard)
             self.add_to_entry(self.raw_split_numerators, sched_name, wss,
                               split_maxtard)
+            self.add_to_entry(self.ave_splits_numerators, sched_name, wss,
+                              ave_splits)
+            self.add_to_entry(self.max_splits_numerators, sched_name, wss,
+                              max_splits)
             improvement = (nonsplit_maxtard - split_maxtard) / nonsplit_maxtard
             # known_schedulers is a set, so each will appear only once.
             self.add_to_entry(self.improvement_numerators, sched_name, wss,
@@ -109,10 +117,16 @@ class DataCollector:
                                                  set_name)[wss]
             raw_split_num = self.get_sub_hash(self.raw_split_numerators,
                                               set_name)[wss]
+            ave_splits_num = self.get_sub_hash(self.ave_splits_numerators,
+                                               set_name)[wss]
+            max_splits_num = self.get_sub_hash(self.max_splits_numerators,
+                                               set_name)[wss]
             points.append((wss, improvement_num / denominator,
                            raw_nonsplit_num / denominator,
                            raw_split_num / denominator,
-                           denominator))
+                           denominator,
+                           ave_splits_num / denominator,
+                           max_splits_num / denominator))
         return sorted(points, key=lambda t: t[0])
 
     def get_all_graph_points(self):
@@ -122,16 +136,18 @@ class DataCollector:
         return to_ret
 
 def get_ludwig_schedulers():
-    return [Scheduler("C-EDF-L2", 2, 12, False, "L2", None),
-            Scheduler("C-EDF-L2-RM", 2, 12, True, "L2", None),
-            Scheduler("C-EDF-L3", 6, 4, False, "L3", None),
-            Scheduler("C-EDF-L3-RM", 6, 4, True, "L3", None)]
+    return [Scheduler("C-FL-split-L2", 2, 12, False, "L2", None),
+            Scheduler("C-FL-split-L2-RM", 2, 12, True, "L2", None),
+            Scheduler("C-FL-split-L3", 6, 4, False, "L3", None),
+            Scheduler("C-FL-split-L3-RM", 6, 4, True, "L3", None)]
 
 def get_ludwig_lock_schedulers():
-    return [Scheduler("C-EDF-L2-RM", 2, 12, True, "L2", "OMLP"),
-            Scheduler("C-EDF-L2-RM", 2, 12, True, "L2", "MX-Q"),
-            Scheduler("C-EDF-L3-RM", 6, 4, True, "L3", "OMLP"),
-            Scheduler("C-EDF-L3-RM", 6, 4, True, "L3", "MX-Q")]
+    return [Scheduler("C-FL-split-L2-RM", 2, 12, True, "L2", "MX-Q"),
+            Scheduler("C-FL-split-L3-RM", 6, 4, True, "L3", "MX-Q")]
+#    return [Scheduler("C-FL-split-L2-RM", 2, 12, True, "L2", "OMLP"),
+#            Scheduler("C-FL-split-L2-RM", 2, 12, True, "L2", "MX-Q"),
+#            Scheduler("C-FL-split-L3-RM", 6, 4, True, "L3", "OMLP"),
+#            Scheduler("C-FL-split-L3-RM", 6, 4, True, "L3", "MX-Q")]
 
 def get_wss_list():
 #    return [4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 3072, 4096, 8192, 12288]
@@ -179,6 +195,14 @@ def partition_tasks(heur_func, cluster_size, clusters, dedicated_irq, taskset):
     else:
         return False
 
+def copy_lock_overheads(oh, lock_oh):
+    oh.lock = lock_oh.lock
+    oh.unlock = lock_oh.unlock
+    oh.read_lock = lock_oh.read_lock
+    oh.read_unlock = lock_oh.read_unlock
+    oh.syscall_in = lock_oh.syscall_in
+    oh.syscall_out = lock_oh.syscall_out
+
 def process_task_systems(task_system_list, scheduler_list):
 
     for scheduler in scheduler_list:
@@ -186,15 +210,17 @@ def process_task_systems(task_system_list, scheduler_list):
         oh = Overheads.from_file(scheduler.oh_file)
         oh.initial_cache_loss = CacheDelay.from_file(scheduler.pmo_file).__dict__[scheduler.cache_level]
         oh.cache_affinity_loss = CacheDelay.from_file(scheduler.pmo_file).__dict__[scheduler.cache_level]
+        unsplit_oh = Overheads.from_file(scheduler.unsplit_oh_file)
+        unsplit_oh.initial_cache_loss = CacheDelay.from_file(scheduler.pmo_file).__dict__[scheduler.cache_level]
+        unsplit_oh.cache_affinity_loss = CacheDelay.from_file(scheduler.pmo_file).__dict__[scheduler.cache_level]
         if scheduler.lock_type is not None:
             lock_oh = Overheads.from_file(scheduler.lock_oh_file)
-            oh.lock = lock_oh.lock
-            oh.unlock = lock_oh.unlock
-            oh.read_lock = lock_oh.read_lock
-            oh.read_unlock = lock_oh.read_unlock
-            syscall_oh = Overheads.from_file(scheduler.syscall_oh_file)
-            oh.syscall_in = syscall_oh.syscall_in
-            oh.syscall_out = syscall_oh.syscall_out
+            copy_lock_overheads(oh, lock_oh)
+            unsplit_lock_oh = Overheads.from_file(scheduler.unsplit_lock_oh_file)
+            copy_lock_overheads(unsplit_oh, unsplit_lock_oh)
+            #syscall_oh = Overheads.from_file(scheduler.syscall_oh_file)
+            #oh.syscall_in = syscall_oh.syscall_in
+            #oh.syscall_out = syscall_oh.syscall_out
             wss_list = get_lock_wss_list()
         else:
             wss_list = get_wss_list()
@@ -212,11 +238,12 @@ def process_task_systems(task_system_list, scheduler_list):
                                              task_system)
                 if partitions:
                     if scheduler.lock_type is not None:
-                        results = compute_splits_lock(oh, scheduler.cluster_size,
+                        results = compute_splits_lock(unsplit_oh, oh,
+                                                      scheduler.cluster_size,
                                                       scheduler.spinlock,
                                                       task_system, partitions)
                     else:
-                        results = compute_splits_nolock(oh,
+                        results = compute_splits_nolock(unsplit_oh, oh,
                                                         scheduler.dedicated_irq,
                                                         task_system, partitions)
                                                     
@@ -224,14 +251,16 @@ def process_task_systems(task_system_list, scheduler_list):
                         reporter.report_data_point(scheduler, task_system_obj,
                                                    wss,
                                                    results.base_lateness,
-                                                   results.best_lateness)
+                                                   results.best_lateness,
+                                                   results.ave_splits,
+                                                   results.max_splits)
 
         data = reporter.get_all_graph_points()
         for sched_name in data:
             print "Doing " + sched_name
             outfile = open('results/' + sched_name, 'w')
             for point in data[sched_name]:
-                outfile.write("{0}\t{1}\t{2}\t{3}\t{4}\n".format(point[0], point[1], point[2], point[3], point[4]))
+                outfile.write("{0}\t{1}\t{2}\t{3}\t{4}\t{5}\t{6}\n".format(point[0], point[1], point[2], point[3], point[4], point[5], point[6]))
             outfile.close()
 
 if len(sys.argv) > 4:

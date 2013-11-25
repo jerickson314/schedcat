@@ -25,37 +25,75 @@ from functools import partial
 from copy import deepcopy
 
 class SplitResult:
-    def __init__(self, base_lateness, best_lateness):
+    def __init__(self, base_lateness, best_lateness, ave_splits, max_splits):
         self.base_lateness = base_lateness
         self.best_lateness = best_lateness
+        self.ave_splits = ave_splits
+        self.max_splits = max_splits
 
-def compute_splits_nolock(overheads, dedicated_irq, taskset, parts):
+def compute_splits_nolock(overheads_unsplit, overheads_split, dedicated_irq,
+                          taskset, parts):
+    true_base_lateness = compute_init_nolock(overheads_unsplit, dedicated_irq,
+                                             taskset, parts)
+    if true_base_lateness is None:
+        return None
     # Initial setup
     for task in taskset:
         task.split = 1
         task.split_saturated = False
-    boundfunc = partial(bound_no_locks, dedicated_irq, overheads)
+    boundfunc = partial(bound_no_locks, dedicated_irq, overheads_split)
+    details = [None]*len(parts)
+    for i in range(len(parts)):
+        details = boundfunc(i, taskset, parts, details)
+        if details is None:
+            return SplitResult(true_base_lateness, true_base_lateness, 1.0, 1.0)
+    return compute_splits(details, taskset, parts, boundfunc,
+                          true_base_lateness, True)
+
+def compute_init_nolock(overheads_unsplit, dedicated_irq, taskset, parts):
+    for task in taskset:
+        task.split = 1
+        task.split_saturated = False
+    boundfunc = partial(bound_no_locks, dedicated_irq, overheads_unsplit)
     details = [None]*len(parts)
     for i in range(len(parts)):
         details = boundfunc(i, taskset, parts, details)
         if details is None:
             return None
-    return compute_splits(details, taskset, parts, boundfunc, True)
+    return max(generic_lateness_list(details))
 
-def compute_splits_lock(oheads, cluster_size, spinlock, taskset, parts):
+def compute_splits_lock(oheads_unsplit, oheads_split, cluster_size, spinlock,
+                        taskset, parts):
+    true_base_lateness = compute_init_lock(oheads_unsplit, cluster_size,
+                                           spinlock, taskset, parts)
+    if true_base_lateness is None:
+        return None
     # Initial setup
     for task in taskset:
         task.split = 1
         task.split_saturated = False
-    boundfunc = partial(bound_with_locks, spinlock, cluster_size, oheads)
+    boundfunc = partial(bound_with_locks, spinlock, cluster_size, oheads_split)
 
+    details = boundfunc(0, taskset, parts, None)
+    if details is None:
+        return SplitResult(true_base_lateness, true_base_lateness, 1.0, 1.0)
+    return compute_splits(details, taskset, parts, boundfunc,
+                          true_base_lateness, False)
+
+def compute_init_lock(oheads_unsplit, cluster_size, spinlock, taskset, parts):
+    # Initial setup
+    for task in taskset:
+        task.split = 1
+        task.split_saturated = False
+    boundfunc = partial(bound_with_locks, spinlock, cluster_size, oheads_unsplit)
 
     details = boundfunc(0, taskset, parts, None)
     if details is None:
         return None
-    return compute_splits(details, taskset, parts, boundfunc, False)
+    return max(generic_lateness_list(details))
 
-def compute_splits(initial_details, taskset, parts, boundfunc, restore_part):
+def compute_splits(initial_details, taskset, parts, boundfunc,
+                   true_base_lateness, restore_part):
     # Compute tardiness bounds for initial task system.
     base_lateness = max(generic_lateness_list(initial_details))
     best_details = initial_details
@@ -74,8 +112,13 @@ def compute_splits(initial_details, taskset, parts, boundfunc, restore_part):
                 best_details = new_details
                 keep_splitting = True
                 break
-    return SplitResult(base_lateness, max(generic_lateness_list(best_details)))
-
+    best_lateness = max(generic_lateness_list(best_details))
+    if best_lateness < true_base_lateness:
+        splits = [task.split for task in taskset]
+        return SplitResult(true_base_lateness, best_lateness,
+                           sum(splits) / len(splits), max(splits))
+    else:
+        return SplitResult(true_base_lateness, true_base_lateness, 1.0, 1.0)
 
 def try_one_split(part_num, taskset, parts, old_details, boundfunc,
                   best_lateness, restore_part):
@@ -113,10 +156,6 @@ def try_one_split(part_num, taskset, parts, old_details, boundfunc,
     if restore_part:
         old_details[part_num] = part_details
     return None
-
-def gfl_lateness_list(details):
-    return [part_details.bounds[0] - part_details.tasks[0].deadline
-            for part_details in details]
 
 def generic_lateness_list(details):
     return [part_details.max_lateness() for part_details in details]

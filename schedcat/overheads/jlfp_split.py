@@ -103,7 +103,7 @@ def charge_scheduling_overheads(oheads, num_cpus, dedicated_irq, taskset):
         ti.cost      = first_cost + (ti.split - 1) * other_cost
         if hasattr(ti, 'request_span'):
             if ti.split > 1:
-                ti.request_span = ti.request_span / uscale
+                ti.request_span = ti.request_span / uscale + cpre
             else:
                 ti.request_span = 0
         if ti.utilization() > 1:

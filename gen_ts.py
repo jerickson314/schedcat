@@ -71,7 +71,7 @@ def generate_lock_tasksets(util_name, period_name, cap, cslength, nres,
                         nreqs = random.randint(1, 5)
                         length = CSLENGTH[cslength]
                         has_requests = True
-                        for i in range(nreqs):
+                        for j in range(nreqs):
                             task.resmodel[res_id].add_request(length())
         filename = dirname + "/taskset_{0}_{1}_{2}_{3}_{4}_{5}_{6}".format(
                 util_name, period_name, cap, cslength, nres, pacc, i)

@@ -7,8 +7,7 @@ from schedcat.overheads.jlfp_split import charge_scheduling_overheads, \
 from schedcat.overheads.locking import charge_spinlock_overheads, \
                                        charge_semaphore_overheads
 
-from schedcat.locking.bounds import assign_pp_locking_prios, \
-                                    assign_edf_locking_prios, \
+from schedcat.locking.bounds import assign_pessimistic_locking_prios, \
                                     apply_task_fair_mutex_bounds, \
                                     apply_clustered_omlp_bounds
 
@@ -198,10 +197,10 @@ def bound_with_locks(spinlock, cluster_size, oheads, part_num, taskset, parts,
         for task in part:
             # Initially assume completion by deadline and use G-FL PPs.
             task.response_time = task.deadline
-            task.pp = task.deadline - (part.cpus - 1) / (part.cpus) * \
-                      task.cost
+            #task.pp = task.deadline - (part.cpus - 1) / (part.cpus) * \
+            #          task.cost
 
-    assign_pp_locking_prios(base_ts)
+    assign_pessimistic_locking_prios(base_ts)
 
     # Initially assume completion by deadline
     for t in base_ts:
@@ -263,7 +262,7 @@ def bound_with_locks(spinlock, cluster_size, oheads, part_num, taskset, parts,
             if not has_bounded_tardiness(part.cpus, part):
                 return None
 
-            details[i] = compute_response_details(cluster_size, part, 15)
+            details[i] = compute_gfl_response_details(cluster_size, part, 15)
 
             # Response-time bounds applied to real version
             for j, t in enumerate(part):
